@@ -430,6 +430,32 @@ uofg-header, uofg-footer { display:block; width:100%; }
 .booking-status { padding:13px 15px; border:1px solid #b7c9d7; background:#edf5fb; color:#12324e; margin-top:18px; font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
 .booking-status.error-state { background:#fff1f0; border-color:#efb4ad; color:#8d2418; }
 .booking-status.success-state { background:#eff8f0; border-color:#b3d8b8; color:#17632a; }
+
+/* Status lookup view: keep booking form hidden until the backend confirms eligibility. */
+.appointment-lookup{padding:32px 52px 38px}
+.appointment-lookup h2{font-size:21px;color:#143e5d;font-weight:600;margin:0 0 12px}
+.appointment-lookup p{font-size:14px;line-height:1.65;color:#405567;margin:0}
+.appointment-lookup .lookup-help{font-size:13px;margin-top:15px}
+.appointment-lookup .lookup-help a{color:#0b4a7d;font-weight:700}
+.lookup-spinner{display:inline-block;width:18px;height:18px;border:3px solid #c7dcec;border-top-color:#0b4a7d;border-radius:50%;animation:mackinnon-spin .75s linear infinite;margin-right:10px;vertical-align:middle}
+@media(max-width:720px){.appointment-lookup{padding:26px 22px}}
+/* Read-only view shown to students who already have an upcoming booking. */
+.existing-booking-panel{padding:34px 52px 38px}
+.existing-booking-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.existing-booking-heading h2{font-size:23px;line-height:1.3;font-weight:600;margin:0;color:#143e5d}
+.existing-booking-badge{display:inline-flex;align-items:center;gap:7px;border-radius:20px;padding:6px 11px;background:#e9f6ed;color:#17632a;font-size:12px;font-weight:700}
+.existing-booking-badge::before{content:"";display:block;width:8px;height:8px;border-radius:50%;background:#198754}
+.existing-booking-description{font-size:13px;color:#526474;line-height:1.65;margin:0 0 22px}
+.existing-booking-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:20px;border:1px solid #d4e2ec;background:#f6f9fc;border-radius:7px}
+.existing-booking-grid .appointment-field{min-width:0}
+.existing-booking-grid .appointment-field span{display:block;font-size:12px;color:#526474;margin-bottom:6px}
+.existing-booking-grid .appointment-field strong{display:block;font-size:15px;color:#173c58;overflow-wrap:anywhere;font-weight:600}
+.existing-booking-help{background:#f5f6f8;border-left:3px solid #0b4a7d;padding:15px 17px;margin-top:20px;line-height:1.6;color:#405567;font-size:13px}
+.existing-booking-help p{margin:0 0 7px}
+.existing-booking-help p:last-child{margin-bottom:0}
+.existing-booking-help a{color:#0b4a7d;font-weight:700}
+@media(max-width:720px){.existing-booking-panel{padding:26px 22px}.existing-booking-grid{grid-template-columns:1fr;gap:17px}}
+
 button:focus-visible { outline:3px solid #0067b8; outline-offset:3px; }
 /* Prospective-student contact card. All styling is scoped to this card. */
 #externalCard{
@@ -691,6 +717,31 @@ button:focus-visible { outline:3px solid #0067b8; outline-offset:3px; }
         <span id="headerEmail"></span>
       </div>
     </header>
+    <!-- Existing appointment: shown instead of the booking form when Flow 2 reports alreadyBooked. -->
+    <section id="existingBookingPanel" class="panel existing-booking-panel hidden" aria-label="Upcoming advising appointment">
+      <div class="existing-booking-heading">
+        <h2>Your upcoming advising appointment</h2>
+        <span class="existing-booking-badge">Confirmed</span>
+      </div>
+      <p class="existing-booking-description">You already have an appointment scheduled with MacKinnon Academic Advising. Your details are shown below.</p>
+      <div class="existing-booking-grid">
+        <div class="appointment-field"><span>Academic advisor</span><strong id="existingAdvisor">Assigned advisor</strong></div>
+        <div class="appointment-field"><span>Meeting type</span><strong id="existingService">To be confirmed</strong></div>
+        <div class="appointment-field"><span>Date</span><strong id="existingDate">To be confirmed</strong></div>
+        <div class="appointment-field"><span>Time</span><strong id="existingTime">To be confirmed</strong></div>
+      </div>
+      <div class="existing-booking-help">
+        <p>Check your confirmation email or calendar invitation for any location or Microsoft Teams joining instructions.</p>
+        <p>To reschedule or cancel, please contact <a href="mailto:baco@uoguelph.ca">baco@uoguelph.ca</a>.</p>
+      </div>
+    </section>
+    <section id="appointmentLookupPanel" class="panel appointment-lookup hidden" role="status" aria-live="polite">
+      <h2 id="appointmentLookupTitle">Checking your appointment status...</h2>
+      <p id="appointmentLookupMessage"><span class="lookup-spinner" aria-hidden="true"></span>Retrieving your MacKinnon advising request and appointment details.</p>
+      <div id="appointmentLookupHelp" class="lookup-help hidden">
+        <a id="appointmentLookupAction" href="mailto:baco@uoguelph.ca">Contact MacKinnon Academic Advising</a>
+      </div>
+    </section>
     <section class="panel">
       <h2 class="section-title">Select service <span class="required-marker" aria-hidden="true">*</span></h2>
       <p class="required-note">Fields marked <span class="required-marker" aria-hidden="true">*</span> are required. Your academic advisor is assigned from your existing advising intake request.</p>
@@ -1276,6 +1327,89 @@ function updateTimer() {
   $("timer").style.color = "#111";
 }
 /* ============================================================
+   EXISTING APPOINTMENT VIEW
+   Flow 2 / getAdvisors can return:
+   { success:true, status:"alreadyBooked", existingBooking: {
+       advisorName, advisorEmail, serviceType, start, end
+   }}
+   start/end MUST be SharePoint UTC timestamps (ISO 8601, with Z).
+   ============================================================ */
+function showLookupState(title = "Checking your appointment status...", message = "Retrieving your advising request and booking details.", action = "") {
+  $("existingBookingPanel").classList.add("hidden");
+  document.querySelectorAll("#bookingPage .panel:not(#existingBookingPanel):not(#appointmentLookupPanel)")
+    .forEach(panel => panel.classList.add("hidden"));
+  const disclaimer = document.querySelector("#bookingPage .booking-disclaimer");
+  if (disclaimer) disclaimer.classList.add("hidden");
+  $("appointmentLookupTitle").textContent = title;
+  $("appointmentLookupMessage").textContent = message;
+  const help = $("appointmentLookupHelp");
+  const link = $("appointmentLookupAction");
+  if (action === "intake") {
+    link.href = "https://forms.cloud.microsoft/r/tXYCaSGZt9?origin=lprLink";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Submit an academic advising request";
+    help.classList.remove("hidden");
+  } else if (action === "contact") {
+    link.href = "mailto:baco@uoguelph.ca";
+    link.removeAttribute("target");
+    link.removeAttribute("rel");
+    link.textContent = "Contact MacKinnon Academic Advising";
+    help.classList.remove("hidden");
+  } else {
+    help.classList.add("hidden");
+  }
+  $("appointmentLookupPanel").classList.remove("hidden");
+}
+function showBookingForm() {
+  $("appointmentLookupPanel").classList.add("hidden");
+  $("existingBookingPanel").classList.add("hidden");
+  document.querySelectorAll("#bookingPage .panel:not(#existingBookingPanel):not(#appointmentLookupPanel)")
+    .forEach(panel => panel.classList.remove("hidden"));
+  const disclaimer = document.querySelector("#bookingPage .booking-disclaimer");
+  if (disclaimer) disclaimer.classList.remove("hidden");
+}
+function appointmentDateTime(iso, options) {
+  if (typeof iso !== "string" || !/(Z|[+-]\d{2}:\d{2})$/i.test(iso)) return null;
+  const parsed = new Date(iso);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    ...options
+  }).format(parsed);
+}
+function showExistingBooking(booking) {
+  if (!booking || typeof booking !== "object") return;
+  // Disallow stale pending availability requests from updating the hidden form.
+  state.availabilityRequestId += 1;
+  bookingCompleted = true;
+  bookingInProgress = false;
+  const rawService = normalizeText(booking.serviceType || booking.service);
+  const service = rawService.includes("online") ? "Online Meeting"
+    : rawService.includes("person") ? "In Person Meeting"
+    : String(booking.serviceType || booking.service || "See your confirmation email");
+  $("existingAdvisor").textContent = booking.advisorName || booking.advisorEmail || "Assigned academic advisor";
+  $("existingService").textContent = service;
+  $("existingDate").textContent = booking.localDateLabel || appointmentDateTime(booking.start, {
+    weekday:"long", month:"long", day:"numeric", year:"numeric"
+  }) || "See your confirmation email";
+  const start = appointmentDateTime(booking.start, {hour:"numeric",minute:"2-digit",hour12:true});
+  const end = appointmentDateTime(booking.end, {hour:"numeric",minute:"2-digit",hour12:true});
+  $("existingTime").textContent = booking.localTimeLabel ||
+    (start && end ? `${start} to ${end} (Eastern Time)` : "See your confirmation email");
+  const empty = $("emptyTimes");
+  empty.classList.remove("is-loading");
+  empty.removeAttribute("aria-busy");
+  $("appointmentLookupPanel").classList.add("hidden");
+  document.querySelectorAll("#bookingPage .panel:not(#existingBookingPanel)")
+    .forEach(panel => panel.classList.add("hidden"));
+  const disclaimer = document.querySelector("#bookingPage .booking-disclaimer");
+  if (disclaimer) disclaimer.classList.add("hidden");
+  $("existingBookingPanel").classList.remove("hidden");
+  $("toast").classList.add("hidden");
+}
+
+/* ============================================================
    OPEN BOOKING + PREFILL STUDENT
    ============================================================ */
 function updateAssignedAdvisorDisplay() {
@@ -1298,6 +1432,7 @@ function updateAssignedAdvisorDisplay() {
 async function loadAdvisors() {
   const empty = $("emptyTimes");
   const loadingSession = state.sessionId;
+  showLookupState();
   $("assignedAdvisorName").textContent = "Loading your assignment...";
   $("assignedAdvisorTag").classList.add("hidden");
   $("intakeRequestPrompt").classList.add("hidden");
@@ -1313,6 +1448,25 @@ async function loadAdvisors() {
       challengeId: loadingSession
     }, AVAILABILITY_FLOW_URL);
     if (state.sessionId !== loadingSession) return;
+    // Checking for an existing appointment takes priority over booking eligibility.
+    // A booked student may no longer have an eligible booking link or active advisor rules.
+    const status = normalizeText(data?.status);
+    if (status === "alreadybooked" || status === "booked") {
+      if (data?.existingBooking && typeof data.existingBooking === "object") {
+        showExistingBooking(data.existingBooking);
+      } else {
+        showLookupState("Appointment already booked", "Your booking exists, but the flow did not return the date and time. Please check your confirmation email or contact advising.", "contact");
+      }
+      return;
+    }
+    if (status === "norequest" || status === "notfound") {
+      showLookupState("No advising request found", "We could not find an advising intake request linked to your verified University email.", "intake");
+      return;
+    }
+    if (status === "pending" || status === "awaitingreview") {
+      showLookupState("Your request is being reviewed", "You do not need to submit your request again. Please wait for the advising office to send your booking instructions.", "contact");
+      return;
+    }
     if (!data?.success || data?.eligible === false) {
       throw new Error(data?.message || "Your intake request is not currently eligible for appointment booking.");
     }
@@ -1333,6 +1487,7 @@ async function loadAdvisors() {
     state.staffEmail = String(assignedRule.advisorEmail || "").trim();
     state.advisorRules = matchingRules;
     state.intakeRequestId = data.intakeRequestId ?? data.requestId ?? null;
+    showBookingForm();
     updateAssignedAdvisorDisplay();
     updateServiceDurationLabels();
     renderCalendar();
@@ -1354,10 +1509,8 @@ async function loadAdvisors() {
     state.staff = null;
     state.staffEmail = null;
     state.intakeRequestId = null;
-    updateAssignedAdvisorDisplay();
-    updateServiceDurationLabels();
-    renderCalendar();
-    clearAvailability(error.message || "Unable to load your advisor assignment.");
+    // Avoid incorrectly telling an already-booked student to submit another intake form.
+    showLookupState("Unable to load your appointment status", error.message || "The advising system could not retrieve your request. Please try again later.", "contact");
   }
 }
 // Duration labels come only from advisor rules returned by Flow 2.
@@ -1374,6 +1527,7 @@ function updateServiceDurationLabels() {
   });
 }
 function openBooking() {
+  showLookupState();
   bookingInProgress = false;
   bookingCompleted = false;
   bookingReference = null;
@@ -1870,7 +2024,15 @@ $("bookBtn").onclick = async () => {
     bookingCompleted = true;
     availabilityCache.clear();
     btn.textContent = "Booked";
-    showBookingStatus(result.message || "Your appointment is confirmed. Check your email for the calendar invitation.", true);
+    // Immediate read-only confirmation after a successful booking response.
+    // On subsequent sign-ins, Flow 2 supplies the authoritative SharePoint details.
+    showExistingBooking(result.existingBooking || {
+      advisorName: state.staff,
+      advisorEmail: state.staffEmail,
+      serviceType: apiServiceType(),
+      localDateLabel: friendlyDate(state.date),
+      localTimeLabel: `${formatSlotTime(state.selectedSlot.start)} to ${formatSlotTime(state.selectedSlot.end)} (Eastern Time)`
+    });
   } catch (error) {
     btn.textContent = "Book";
     showBookingStatus(error.message || "Unable to confirm your booking. Please contact advising.");
